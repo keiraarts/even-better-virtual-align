@@ -9,8 +9,8 @@
 import * as vscode from "vscode";
 import { AlignmentGroup } from "../core/types";
 
-/** Maximum number of spaces we'll cache decoration types for */
-const MAX_CACHED_WIDTH = 50;
+/** Maximum number of shared decoration types retained between updates. */
+const MAX_CACHED_TYPES = 50;
 
 export class DecorationManager {
   /** Cache of decoration types by width (number of spaces) */
@@ -19,6 +19,10 @@ export class DecorationManager {
 
   /** Track which decoration types are currently applied to clear them */
   private activeDecorations: Map<vscode.TextEditor, Set<number>> = new Map();
+  private transientDecorations = new Map<
+    vscode.TextEditor,
+    Map<number, vscode.TextEditorDecorationType>
+  >();
 
   /**
    * Updates decorations for an editor based on alignment groups.
@@ -31,6 +35,12 @@ export class DecorationManager {
   update(editor: vscode.TextEditor, groups: AlignmentGroup[]): void {
     // Clear existing decorations for this editor
     this.clear(editor);
+    const configuredLimit = vscode.workspace
+      .getConfiguration("evenBetterVirtualAlign", editor.document)
+      .get<number>("maxPadding", 0);
+    const paddingLimit = Number.isInteger(configuredLimit) && configuredLimit > 0
+      ? configuredLimit
+      : Infinity;
 
     // Separate groups by type
     const commentGroups = groups.filter((g) => g.tokens[0]?.type === "//");
@@ -85,9 +95,9 @@ export class DecorationManager {
 
         // Apply padding and update shifts
         for (const { token, visualEnd } of tokenVisualEnds) {
-          const spacesNeeded = maxVisualEnd - visualEnd;
+          const spacesNeeded = Math.min(maxVisualEnd - visualEnd, paddingLimit);
 
-          if (spacesNeeded > 0 && spacesNeeded <= MAX_CACHED_WIDTH) {
+          if (spacesNeeded > 0) {
             // Pad BEFORE the token (right-align)
             const shift = scopeLineShift.get(token.line) ?? 0;
             const visualColumn = token.column + shift;
@@ -133,9 +143,11 @@ export class DecorationManager {
       for (const token of group.tokens) {
         const shift = lineShift.get(token.line) ?? 0;
         const currentVisualEndColumn = token.column + token.text.length + shift;
-        const spacesNeeded = targetVisualEndColumn - currentVisualEndColumn;
+        const spacesNeeded = Math.min(
+          targetVisualEndColumn - currentVisualEndColumn, paddingLimit
+        );
 
-        if (spacesNeeded <= 0 || spacesNeeded > MAX_CACHED_WIDTH) {
+        if (spacesNeeded <= 0) {
           continue;
         }
 
@@ -187,7 +199,7 @@ export class DecorationManager {
           // For `:` - pad AFTER operator to align values
           // Visual end = document position + text length + accumulated shift
           const visualEnd = token.column + token.text.length + currentShift;
-          spacesNeeded = visualTargetColumn - visualEnd;
+          spacesNeeded = Math.min(visualTargetColumn - visualEnd, paddingLimit);
           pos = new vscode.Position(
             token.line,
             token.column + token.text.length
@@ -196,7 +208,7 @@ export class DecorationManager {
           // For `=`, `&&`, `||`, `}` - pad BEFORE operator to align operators
           // Visual start = document position + accumulated shift
           const visualStart = token.column + currentShift;
-          spacesNeeded = visualTargetColumn - visualStart;
+          spacesNeeded = Math.min(visualTargetColumn - visualStart, paddingLimit);
           pos = new vscode.Position(token.line, token.column);
         }
 
@@ -208,7 +220,7 @@ export class DecorationManager {
           lineShift.set(token.line, currentShift + actualSpacesAdded);
         }
 
-        if (spacesNeeded <= 0 || spacesNeeded > MAX_CACHED_WIDTH) {
+        if (spacesNeeded <= 0) {
           continue;
         }
 
@@ -233,9 +245,11 @@ export class DecorationManager {
       for (const token of group.tokens) {
         const shift = lineShift.get(token.line) ?? 0;
         const currentVisualColumn = token.column + shift;
-        const spacesNeeded = targetVisualColumn - currentVisualColumn;
+        const spacesNeeded = Math.min(
+          targetVisualColumn - currentVisualColumn, paddingLimit
+        );
 
-        if (spacesNeeded <= 0 || spacesNeeded > MAX_CACHED_WIDTH) {
+        if (spacesNeeded <= 0) {
           continue;
         }
 
@@ -253,7 +267,7 @@ export class DecorationManager {
     const activeWidths = new Set<number>();
 
     for (const [width, ranges] of rangesByWidth) {
-      const decorationType = this.getDecorationType(width);
+      const decorationType = this.getDecorationType(width, editor);
       editor.setDecorations(decorationType, ranges);
       activeWidths.add(width);
     }
@@ -264,19 +278,30 @@ export class DecorationManager {
   /**
    * Gets or creates a decoration type for a specific width.
    */
-  private getDecorationType(width: number): vscode.TextEditorDecorationType {
-    if (!this.decorationTypes.has(width)) {
-      const decorationType = vscode.window.createTextEditorDecorationType({
-        before: {
-          // Use non-breaking spaces for consistent width
-          contentText: "\u00a0".repeat(width),
-          // Make the spacer invisible but take up space
-          color: "transparent",
-        },
-      });
-      this.decorationTypes.set(width, decorationType);
+  private getDecorationType(
+    width: number,
+    editor: vscode.TextEditor
+  ): vscode.TextEditorDecorationType {
+    const cached = this.decorationTypes.get(width);
+    if (cached) {
+      return cached;
     }
-    return this.decorationTypes.get(width)!;
+    const decorationType = vscode.window.createTextEditorDecorationType({
+      before: {
+        contentText: "\u00a0",
+        width: `${width}ch`,
+        color: "transparent",
+      },
+    });
+    if (this.decorationTypes.size < MAX_CACHED_TYPES) {
+      this.decorationTypes.set(width, decorationType);
+    } else {
+      if (!this.transientDecorations.has(editor)) {
+        this.transientDecorations.set(editor, new Map());
+      }
+      this.transientDecorations.get(editor)!.set(width, decorationType);
+    }
+    return decorationType;
   }
 
   /**
@@ -286,12 +311,28 @@ export class DecorationManager {
     const activeWidths = this.activeDecorations.get(editor);
     if (activeWidths) {
       for (const width of activeWidths) {
-        const decorationType = this.decorationTypes.get(width);
+        const decorationType = this.decorationTypes.get(width)
+          ?? this.transientDecorations.get(editor)?.get(width);
         if (decorationType) {
           editor.setDecorations(decorationType, []);
         }
       }
       this.activeDecorations.delete(editor);
+    }
+    const transient = this.transientDecorations.get(editor);
+    if (transient) {
+      for (const decorationType of transient.values()) {
+        decorationType.dispose();
+      }
+      this.transientDecorations.delete(editor);
+    }
+  }
+
+  clearHiddenEditors(editors: readonly vscode.TextEditor[]): void {
+    for (const editor of this.activeDecorations.keys()) {
+      if (!editors.includes(editor)) {
+        this.clear(editor);
+      }
     }
   }
 

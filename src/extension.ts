@@ -22,6 +22,7 @@ let decorationManager: DecorationManager;
 let outputChannel: vscode.OutputChannel;
 let statusBarItem: vscode.StatusBarItem;
 let enabled = true;
+const editorUpdates = new WeakMap<vscode.TextEditor, number>();
 
 /**
  * Updates the status bar item to reflect current state.
@@ -259,6 +260,23 @@ export async function activate(
   );
   context.subscriptions.push(documentChangeDisposable);
 
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
+    if (!enabled || !event.affectsConfiguration("evenBetterVirtualAlign")) {
+      return;
+    }
+    for (const editor of vscode.window.visibleTextEditors) {
+      void updateEditor(editor);
+    }
+  }));
+  context.subscriptions.push(vscode.window.onDidChangeVisibleTextEditors((editors) => {
+    decorationManager.clearHiddenEditors(editors);
+    if (enabled) {
+      for (const editor of editors) {
+        void updateEditor(editor);
+      }
+    }
+  }));
+
   // Initial update for active editor
   if (vscode.window.activeTextEditor) {
     debouncedUpdate(vscode.window.activeTextEditor);
@@ -387,6 +405,8 @@ function calculatePaddingOps(
  * Updates alignment decorations for an editor.
  */
 async function updateEditor(editor: vscode.TextEditor): Promise<void> {
+  const updateVersion = (editorUpdates.get(editor) ?? 0) + 1;
+  editorUpdates.set(editor, updateVersion);
   if (!enabled) {
     return;
   }
@@ -421,6 +441,13 @@ async function updateEditor(editor: vscode.TextEditor): Promise<void> {
 
     // Parse document to extract tokens
     const tokens = await parserService.parse(docAdapter, startLine, endLine);
+    if (
+      !enabled || document.isClosed ||
+      editorUpdates.get(editor) !== updateVersion ||
+      !vscode.window.visibleTextEditors.includes(editor)
+    ) {
+      return;
+    }
 
     // Group tokens into alignment groups
     const groups = groupTokens(tokens);

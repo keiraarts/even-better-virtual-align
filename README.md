@@ -209,6 +209,12 @@ This inserts actual space characters to align your code. The changes are reversi
 
 ## Configuration
 
+`evenBetterVirtualAlign.maxPadding` controls virtual spacer width. It defaults to
+`0` (unlimited), so short translation keys still align with long keys. Set a
+positive integer to cap padding per alignment point; capped values may no longer
+share one column. This setting supports language overrides and updates visible
+editors immediately. It does not affect the Apply Formatting command.
+
 You can enable or disable alignment for specific languages in your `settings.json`:
 
 ```json
