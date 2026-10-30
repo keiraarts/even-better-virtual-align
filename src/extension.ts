@@ -438,6 +438,9 @@ async function updateEditor(editor: vscode.TextEditor): Promise<void> {
 
     // Parse document to extract tokens
     const tokens = await parserService.parse(docAdapter, startLine, endLine);
+    if (!enabled || document.isClosed || !vscode.window.visibleTextEditors.includes(editor)) {
+      return;
+    }
 
     // Group tokens into alignment groups
     const groups = groupTokens(tokens);
