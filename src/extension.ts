@@ -259,6 +259,23 @@ export async function activate(
   );
   context.subscriptions.push(documentChangeDisposable);
 
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
+    if (!enabled || !event.affectsConfiguration("evenBetterVirtualAlign")) {
+      return;
+    }
+    for (const editor of vscode.window.visibleTextEditors) {
+      void updateEditor(editor);
+    }
+  }));
+  context.subscriptions.push(vscode.window.onDidChangeVisibleTextEditors((editors) => {
+    decorationManager.clearHiddenEditors(editors);
+    if (enabled) {
+      for (const editor of editors) {
+        void updateEditor(editor);
+      }
+    }
+  }));
+
   // Initial update for active editor
   if (vscode.window.activeTextEditor) {
     debouncedUpdate(vscode.window.activeTextEditor);

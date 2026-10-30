@@ -2,7 +2,7 @@
   "name": "even-better-virtual-align",
   "displayName": "Even Better Virtual Align",
   "description": "Virtual alignment of = : && || and/or in TypeScript, TSX, JSON, YAML, Python, CSS, and Markdown code blocks without modifying files",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -77,6 +77,13 @@
           "additionalProperties": {
             "type": "boolean"
           }
+        },
+        "evenBetterVirtualAlign.maxPadding": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "scope": "language-overridable",
+          "description": "Maximum virtual padding per alignment point, in character columns. 0 means unlimited. A positive limit can leave values in different columns. Does not affect Apply Formatting."
         }
       }
     }
@@ -88,7 +95,7 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "vscode-test",
-    "test:unit": "npm run compile && node out/test/unit-runner.js",
+    "test:unit": "npm run compile && node out/test/unit-runner.js && node --test test/*.test.cjs",
     "postinstall": "node scripts/patch-tree-sitter.js"
   },
   "dependencies": {
