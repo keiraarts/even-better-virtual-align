@@ -7,6 +7,7 @@ const events = {};
 const commands = {};
 const pending = [];
 const scopes = [];
+let enabledLanguages = {};
 const vscode = {
   Position: class { constructor(line, character) { Object.assign(this, {line, character}); } },
   Range: class { constructor(start, end) { Object.assign(this, {start, end}); } },
@@ -15,7 +16,7 @@ const vscode = {
   workspace: {
     getConfiguration(section, document) {
       scopes.push(document);
-      return {get: (key, fallback) => key === 'maxPadding' ? document.cap : fallback};
+      return {get: (key, fallback) => key === 'maxPadding' ? document.cap : key === 'enabledLanguages' ? enabledLanguages : fallback};
     },
     onDidChangeTextDocument(callback) {events.text = callback; return {dispose() {}};},
     onDidChangeConfiguration(callback) {events.config = callback; return {dispose() {}};},
@@ -72,6 +73,12 @@ test('settings refresh all visible editors and late parses cannot restore hidden
       assert.ok([...current.applied.values()].every(ranges => ranges.length === 0), 'hidden editor must stay clear after pending parse');
     }
     vscode.window.visibleTextEditors = [first];
+    events.config({affectsConfiguration: () => true});
+    enabledLanguages = {json: false};
+    events.config({affectsConfiguration: () => true});
+    await completeParses();
+    assert.ok([...first.applied.values()].every(ranges => ranges.length === 0), 'disabled language must stay clear after pending parse');
+    enabledLanguages = {};
     events.config({affectsConfiguration: () => true});
     commands['even-better-virtual-align.disable']();
     await completeParses();

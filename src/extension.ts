@@ -22,6 +22,7 @@ let decorationManager: DecorationManager;
 let outputChannel: vscode.OutputChannel;
 let statusBarItem: vscode.StatusBarItem;
 let enabled = true;
+const editorUpdates = new WeakMap<vscode.TextEditor, number>();
 
 /**
  * Updates the status bar item to reflect current state.
@@ -404,6 +405,8 @@ function calculatePaddingOps(
  * Updates alignment decorations for an editor.
  */
 async function updateEditor(editor: vscode.TextEditor): Promise<void> {
+  const updateVersion = (editorUpdates.get(editor) ?? 0) + 1;
+  editorUpdates.set(editor, updateVersion);
   if (!enabled) {
     return;
   }
@@ -438,7 +441,11 @@ async function updateEditor(editor: vscode.TextEditor): Promise<void> {
 
     // Parse document to extract tokens
     const tokens = await parserService.parse(docAdapter, startLine, endLine);
-    if (!enabled || document.isClosed || !vscode.window.visibleTextEditors.includes(editor)) {
+    if (
+      !enabled || document.isClosed ||
+      editorUpdates.get(editor) !== updateVersion ||
+      !vscode.window.visibleTextEditors.includes(editor)
+    ) {
       return;
     }
 
